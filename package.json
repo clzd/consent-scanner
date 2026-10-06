@@ -1,0 +1,21 @@
+{
+  "name": "consent-scanner",
+  "version": "0.1.0",
+  "description": "Scan one URL in headless Chromium before consent and report third-party requests, scripts, and cookies.",
+  "type": "module",
+  "bin": {
+    "consent-scanner": "bin/consent-scanner.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test",
+    "test:unit": "node --test test/*.unit.test.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "playwright": "^1.63.0",
+    "tldts": "^7.4.16"
+  }
+}

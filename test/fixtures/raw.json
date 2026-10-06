@@ -1,0 +1,36 @@
+{
+  "scannedAt": "2026-10-06T21:30:00.000Z",
+  "input": { "url": "https://example.com/", "finalUrl": "https://www.example.com/", "waitSeconds": 10 },
+  "environment": {
+    "browserVersion": "140.0.0.0",
+    "userAgent": "Mozilla/5.0 HeadlessChrome",
+    "locale": "en-GB",
+    "timezone": "Europe/Amsterdam",
+    "exitIp": "203.0.113.7",
+    "exitCountry": "NL",
+    "exitTimezone": "Europe/Amsterdam",
+    "requireEu": false
+  },
+  "mainStatus": 200,
+  "title": "Example shop",
+  "presentBotSelectors": [],
+  "warnings": [],
+  "banner": { "detected": true, "cmp": "OneTrust", "visible": true },
+  "requests": [
+    { "url": "https://www.example.com/", "method": "GET", "resourceType": "document", "frameUrl": "https://www.example.com/", "status": 200, "failed": false, "msSinceStart": 0 },
+    { "url": "https://static.example.com/app.js", "method": "GET", "resourceType": "script", "frameUrl": "https://www.example.com/", "status": 200, "failed": false, "msSinceStart": 120 },
+    { "url": "https://cdn.cookielaw.org/scripttemplates/otSDKStub.js", "method": "GET", "resourceType": "script", "frameUrl": "https://www.example.com/", "status": 200, "failed": false, "msSinceStart": 150 },
+    { "url": "https://www.googletagmanager.com/gtag/js?id=G-ABC123", "method": "GET", "resourceType": "script", "frameUrl": "https://www.example.com/", "status": 200, "failed": false, "msSinceStart": 300 },
+    { "url": "https://www.google-analytics.com/g/collect?v=2&tid=G-ABC123", "method": "POST", "resourceType": "fetch", "frameUrl": "https://www.example.com/", "status": 204, "failed": false, "msSinceStart": 812 },
+    { "url": "https://connect.facebook.net/en_US/fbevents.js", "method": "GET", "resourceType": "script", "frameUrl": "https://www.example.com/", "status": 200, "failed": false, "msSinceStart": 400 },
+    { "url": "https://www.facebook.com/tr/?id=1&ev=PageView", "method": "GET", "resourceType": "image", "frameUrl": "https://www.example.com/", "status": null, "failed": true, "msSinceStart": 900 },
+    { "url": "https://px.mystery-tracker.io/p.gif", "method": "GET", "resourceType": "image", "frameUrl": "https://www.example.com/", "status": 200, "failed": false, "msSinceStart": 950 }
+  ],
+  "cookies": [
+    { "name": "_ga", "value": "GA1.1.123.456", "domain": ".example.com", "path": "/", "expires": 1854394200, "httpOnly": false, "secure": false, "sameSite": "Lax" },
+    { "name": "_ga_ABC123", "value": "GS1.1.x", "domain": ".example.com", "path": "/", "expires": 1854394200, "httpOnly": false, "secure": false, "sameSite": "Lax" },
+    { "name": "_fbp", "value": "fb.1.2.3", "domain": ".example.com", "path": "/", "expires": 1799098200, "httpOnly": false, "secure": false, "sameSite": "Lax" },
+    { "name": "sessionid", "value": "secret-session", "domain": "www.example.com", "path": "/", "expires": -1, "httpOnly": true, "secure": true, "sameSite": "Strict" },
+    { "name": "OptanonConsent", "value": "isGpcEnabled=0", "domain": ".example.com", "path": "/", "expires": 1822858200, "httpOnly": false, "secure": false, "sameSite": "Lax" }
+  ]
+}
