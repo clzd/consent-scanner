@@ -1,6 +1,7 @@
 // Renders the classified result as a plain-language Markdown report and as JSON.
 import { ALLOWED_COUNTRIES } from './location.js';
 import { UNRECOGNIZED } from './classify.js';
+import { code, cell } from './markdown.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const COUNTRIES_WITH_THE = new Set(['NL', 'GB', 'US', 'AE', 'PH']);
@@ -31,8 +32,6 @@ const CAVEAT = 'Some third-party requests (content delivery networks, web fonts,
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1);
-const code = (s) => `\`${String(s).replaceAll('`', '%60')}\``;
-const cell = (s) => String(s).replaceAll('|', '\\|');
 
 export function verdictLine(result) {
   if (result.blocked.detected) return 'This scan is unreliable: the site showed a bot check instead of the real page.';
@@ -84,7 +83,7 @@ function introSection(result) {
     out.push(`${result.blocked.reason} Sites often treat VPN addresses as suspicious. Try again with your VPN connected to a different VPN server.`);
   }
   out.push(
-    `Scanned ${input.finalUrl || input.url} on ${formatDate(scannedAt)}, from ${countryPhrase(env.exitCountry)} ` +
+    `Scanned ${code(input.finalUrl || input.url)} on ${formatDate(scannedAt)}, from ${countryPhrase(env.exitCountry)} ` +
     `(browser set to ${env.locale}, ${env.timezone}). We loaded the page in a fresh browser, didn't click anything, ` +
     `and recorded activity for ${plural(input.waitSeconds, 'second', 'seconds')} after the page finished loading.`,
   );

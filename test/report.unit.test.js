@@ -77,9 +77,22 @@ test('blocked verdict replaces the normal verdict and suggests another VPN serve
   assert.match(md, /different VPN server/);
 });
 
+test('a hostile page title cannot inject a link or HTML into the report', () => {
+  const title = 'Just a moment [Download the full report](https://evil.example/) <b>x</b>';
+  const md = renderMarkdown(result((x) => { x.title = title; }));
+  assert.ok(md.includes(`The page title \`${title}\` looks like a bot check.`), md);
+  assert.equal(md.split(title).length, 2, 'title appears outside the code span');
+});
+
+test('a hostile final URL cannot inject a link into the report', () => {
+  const finalUrl = 'https://www.example.com/[Download](https://evil.example/)';
+  const md = renderMarkdown(result((x) => { x.input.finalUrl = finalUrl; }));
+  assert.ok(md.includes(`Scanned \`${finalUrl}\` on`), md);
+});
+
 test('scan context sentence', () => {
   const md = renderMarkdown(result());
-  assert.ok(md.includes('Scanned https://www.example.com/ on 6 Oct 2026, 21:30 UTC, from the Netherlands (browser set to en-GB, Europe/Amsterdam).'), md);
+  assert.ok(md.includes('Scanned `https://www.example.com/` on 6 Oct 2026, 21:30 UTC, from the Netherlands (browser set to en-GB, Europe/Amsterdam).'), md);
   assert.ok(md.includes("We loaded the page in a fresh browser, didn't click anything, and recorded activity for 10 seconds after the page finished loading."));
 });
 

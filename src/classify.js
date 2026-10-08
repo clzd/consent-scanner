@@ -2,6 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { getDomain } from 'tldts';
 import { BOT_CHECKS } from './botchecks.js';
+import { code } from './markdown.js';
 
 export const TOOL = { name: 'consent-scanner', version: '0.1.0' };
 export const UNRECOGNIZED = 'Unrecognized';
@@ -57,7 +58,7 @@ export function detectBlocked({ mainStatus, title, presentSelectors = [] }) {
     return { detected: true, reason: `The main page returned HTTP ${mainStatus}.` };
   }
   if (title && BOT_CHECKS.title.test(title)) {
-    return { detected: true, reason: `The page title "${title}" looks like a bot check.` };
+    return { detected: true, reason: `The page title ${code(title)} looks like a bot check.` };
   }
   const selector = BOT_CHECKS.selectors.find((s) => presentSelectors.includes(s));
   if (selector) return { detected: true, reason: `The page contains a bot-check element (${selector}).` };

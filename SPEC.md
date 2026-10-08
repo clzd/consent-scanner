@@ -62,7 +62,7 @@ consent-scanner --help
 5. Wait up to 30 s for the `load` event. If it doesn't fire, add a warning and continue.
 6. Wait `--wait` seconds, then stop recording and ignore any later events.
 7. Collect cookies for every domain with `context.cookies()`.
-8. Run banner detection (see [Consent banner detection](#consent-banner-detection)) and [bot-check detection](#bot-check-detection).
+8. Run banner detection (see [Consent banner detection](#consent-banner-detection)) and [bot-check detection](#bot-check-detection). Both read the page on its own main thread, so they share a 5 s deadline. If a page freezes itself and the deadline passes, add a warning and treat the page as having no banner and not blocked.
 9. Close the browser, classify the data, and write both files.
 
 ## Location check
@@ -96,7 +96,7 @@ VPN exit IPs are well-known datacenter addresses, so some sites answer them with
 - One of these elements exists: `#challenge-form`, `#cf-challenge-running`, `iframe[src*="challenges.cloudflare.com"]`, `#px-captcha`, or `#sec-if-cpt-container`.
 
 When the page is blocked:
-- Set `blocked: { detected: true, reason: "<which signal matched>" }` in the JSON.
+- Set `blocked: { detected: true, reason: "<which signal matched>" }` in the JSON. A page title in the reason is wrapped in a Markdown code span, so a hostile title can't add links or HTML to the report.
 - Replace the report's verdict line with: **"This scan is unreliable: the site showed a bot check instead of the real page."** The report should also suggest trying a different VPN server.
 - Write both files and exit `3`.
 

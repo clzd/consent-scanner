@@ -6,11 +6,22 @@ import { BOT_CHECKS } from './botchecks.js';
 
 const NAV_TIMEOUT_MS = 30_000;
 const LOAD_TIMEOUT_MS = 30_000;
+// Reading the page runs on its main thread, so a page that freezes itself would block it forever.
+const INSPECT_TIMEOUT_MS = 5_000;
+const TIMED_OUT = Symbol('timed out');
 
 export class ScanError extends Error {}
 
 const firstLine = (err) => String(err?.message ?? err).split('\n')[0];
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Resolves to the promise's value, or to TIMED_OUT after ms. */
+function withDeadline(promise, ms) {
+  let timer;
+  const deadline = new Promise((resolve) => { timer = setTimeout(resolve, ms, TIMED_OUT); });
+  promise.catch(() => {}); // the abandoned call rejects later, when the browser closes
+  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
+}
 
 async function detectBanner(page) {
   for (const cmp of CMPS) {
@@ -39,6 +50,14 @@ async function presentSelectors(page, selectors) {
     if ((await page.locator(s).count().catch(() => 0)) > 0) found.push(s);
   }
   return found;
+}
+
+async function inspectPage(page) {
+  const banner = await detectBanner(page);
+  const title = await page.title().catch(() => '');
+  const presentBotSelectors = await presentSelectors(page, BOT_CHECKS.selectors);
+  const userAgent = await page.evaluate(() => navigator.userAgent).catch(() => null);
+  return { banner, title, presentBotSelectors, userAgent };
 }
 
 /**
@@ -116,10 +135,12 @@ export async function runScan({ url, waitSeconds, locale, timezone }) {
     await Promise.allSettled(pending);
 
     const cookies = (await context.cookies()).map(({ value, ...rest }) => rest);
-    const banner = await detectBanner(page);
-    const title = await page.title().catch(() => '');
-    const presentBotSelectors = await presentSelectors(page, BOT_CHECKS.selectors);
-    const userAgent = await page.evaluate(() => navigator.userAgent).catch(() => null);
+    let inspected = await withDeadline(inspectPage(page), INSPECT_TIMEOUT_MS);
+    if (inspected === TIMED_OUT) {
+      warnings.push("The page stopped responding while we checked it for a consent banner and a bot check, so neither could be detected.");
+      inspected = { banner: { detected: false, cmp: null, visible: null }, title: '', presentBotSelectors: [], userAgent: null };
+    }
+    const { banner, title, presentBotSelectors, userAgent } = inspected;
 
     return {
       scannedAt,

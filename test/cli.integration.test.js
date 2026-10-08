@@ -43,6 +43,8 @@ before(async () => {
     '/frame': `<!doctype html><img src="http://127.0.0.1:${port2}/pixel.gif">`,
     '/clean': `<!doctype html><title>Clean</title>${listeners}<p>Nothing to see</p>`,
     '/challenge': '<!doctype html><title>Just a moment...</title><form id="challenge-form"></form>',
+    // Freezes its own main thread right after load, so only the post-wait inspection can hang.
+    '/hang': '<!doctype html><title>Hang</title><script>addEventListener("load", () => setTimeout(() => { for (;;) {} }, 0));</script>',
   };
   first = http.createServer((req, res) => {
     const path = req.url.split('?')[0];
@@ -151,6 +153,16 @@ describe('CLI scans', { concurrency: true }, () => {
     assert.equal(r.json.blocked.detected, true);
     assert.ok(r.json.blocked.reason);
     assert.match(r.md, /This scan is unreliable/);
+  });
+
+  test('a page that freezes itself still finishes, with a warning', { timeout: 20_000 }, async () => {
+    const r = await run([url('/hang'), '--wait', '0.5']);
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.files.length, 2);
+    assert.deepEqual(r.json.banner, { detected: false, cmp: null, visible: null });
+    assert.equal(r.json.blocked.detected, false);
+    assert.ok(r.json.warnings.some((w) => /stopped responding/.test(w)), JSON.stringify(r.json.warnings));
+    assert.match(r.md, /stopped responding/);
   });
 
   test('an explicit --timezone and --locale are applied', async () => {

@@ -114,6 +114,11 @@ test('detectBlocked: challenge titles', () => {
   }
 });
 
+test('detectBlocked: the title is quoted as a code span, and a backtick in it cannot close the span', () => {
+  const r = detectBlocked({ mainStatus: 200, title: 'Just a moment` [x](https://evil.example/)', presentSelectors: [] });
+  assert.equal(r.reason, 'The page title `Just a moment%60 [x](https://evil.example/)` looks like a bot check.');
+});
+
 test('detectBlocked: challenge selectors', () => {
   const r = detectBlocked({ mainStatus: 200, title: 'Shop', presentSelectors: ['#px-captcha'] });
   assert.equal(r.detected, true);
