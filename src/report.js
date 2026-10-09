@@ -73,12 +73,12 @@ function truncate(url) {
   return url.length > URL_LIMIT ? `${url.slice(0, URL_LIMIT - 1)}…` : url;
 }
 
+const EU_WARNING = '⚠️ This scan did not come from an EU location, so it may not reflect what EU visitors see.';
+
 function introSection(result) {
   const { input, environment: env, scannedAt } = result;
   const out = [`**${verdictLine(result)}**`];
-  if (!ALLOWED_COUNTRIES.has(env.exitCountry)) {
-    out.push('⚠️ This scan did not come from an EU location, so it may not reflect what EU visitors see.');
-  }
+  if (!ALLOWED_COUNTRIES.has(env.exitCountry)) out.push(EU_WARNING);
   if (result.blocked.detected) {
     out.push(`${result.blocked.reason} Sites often treat VPN addresses as suspicious. Try again with your VPN connected to a different VPN server.`);
   }
@@ -90,7 +90,7 @@ function introSection(result) {
   return out;
 }
 
-function bannerSection({ banner }) {
+function bannerSection({ banner }, h = '##') {
   let text;
   if (!banner.detected) {
     text = "We didn't recognize a consent banner on this page. The site may use a consent tool we don't know about, or it may not show one at all.";
@@ -101,11 +101,11 @@ function bannerSection({ banner }) {
   } else {
     text = `A ${banner.cmp} consent tool was detected on the page, but we couldn't tell whether its banner was showing. Everything below happened before anyone answered it.`;
   }
-  return ['## Consent banner', text];
+  return [`${h} Consent banner`, text];
 }
 
-function companiesSection({ companies }) {
-  const out = ['## Who was contacted'];
+function companiesSection({ companies }, h = '##', domainsListedIn = 'the appendix') {
+  const out = [`${h} Who was contacted`];
   if (companies.length === 0) {
     out.push("This page didn't contact any outside companies before consent.");
     return out;
@@ -128,13 +128,13 @@ function companiesSection({ companies }) {
   out.push(rows.join('\n'));
   const unknown = companies.find((c) => c.company === UNRECOGNIZED);
   if (unknown) {
-    out.push(`"Unrecognized third party" means an outside server that isn't on our list of known companies (${plural(unknown.domains.length, 'domain', 'domains')}, listed in the appendix).`);
+    out.push(`"Unrecognized third party" means an outside server that isn't on our list of known companies (${plural(unknown.domains.length, 'domain', 'domains')}, listed in ${domainsListedIn}).`);
   }
   return out;
 }
 
-function cookiesSection({ cookies, scannedAt }) {
-  const out = ['## Cookies'];
+function cookiesSection({ cookies, scannedAt }, h = '##') {
+  const out = [`${h} Cookies`];
   if (cookies.length === 0) {
     out.push('No cookies were set.');
     return out;
@@ -165,12 +165,13 @@ function meaningSection({ summary }) {
   return ['## What this means', text + CAVEAT];
 }
 
+const LIMITATIONS = [
+  'One page, one visit, no scrolling or clicking. Some trackers only fire on interaction.',
+  "The scan's location is the VPN server's location. Sites can treat known VPN addresses differently from home connections.",
+];
+
 function limitationsSection({ warnings }) {
-  const items = [
-    'One page, one visit, no scrolling or clicking. Some trackers only fire on interaction.',
-    "The scan's location is the VPN server's location. Sites can treat known VPN addresses differently from home connections.",
-    ...warnings,
-  ];
+  const items = [...LIMITATIONS, ...warnings];
   return ['## Limitations', items.map((w) => `- ${w}`).join('\n')];
 }
 
@@ -212,4 +213,97 @@ export function renderMarkdown(result) {
 
 export function renderJson(result) {
   return `${JSON.stringify(result, null, 2)}\n`;
+}
+
+// Batch report: one summary table, then a short section per URL. Per-request detail stays in each JSON.
+
+const hostOf = (url) => new URL(url).hostname;
+
+export function batchVerdict(entries) {
+  const n = entries.length;
+  const scanned = entries.filter((e) => e.result);
+  const findings = scanned.filter((e) => !e.result.blocked.detected && e.result.summary.hasFindings).length;
+  const blocked = scanned.filter((e) => e.result.blocked.detected).length;
+  const failed = n - scanned.length;
+  const out = [];
+  if (findings === 0 && blocked === 0 && failed === 0) {
+    out.push(`No third-party trackers or tracking cookies were detected before consent on any of the ${plural(n, 'page', 'pages')}.`);
+  } else {
+    out.push(`Before any consent was given, ${findings} of ${plural(n, 'page', 'pages')} contacted outside companies or set tracking cookies.`);
+  }
+  if (blocked) out.push(`${plural(blocked, 'page', 'pages')} showed a bot check instead of the real page.`);
+  if (failed) out.push(`${plural(failed, 'page', 'pages')} couldn't be scanned.`);
+  return out.join(' ');
+}
+
+function batchRow({ url, result }) {
+  if (!result) return `| ${cell(code(url))} | Scan failed | n/a | n/a | n/a |`;
+  const { summary, blocked } = result;
+  const status = blocked.detected ? 'Blocked by a bot check' : summary.hasFindings ? 'Findings' : 'No findings';
+  const cookies = summary.trackingCookies ? `${summary.cookies} (${summary.trackingCookies} tracking)` : `${summary.cookies}`;
+  return `| ${cell(code(url))} | ${status} | ${summary.companies} | ${cookies} | ${summary.thirdPartyScripts} |`;
+}
+
+function batchSummarySection(entries) {
+  return [
+    '## Summary',
+    [
+      '| URL | Result | Third parties | Cookies | Scripts before consent |',
+      '|---|---|---|---|---|',
+      ...entries.map(batchRow),
+    ].join('\n'),
+    '*Third parties* are the outside companies each page contacted. *Cookies* counts every cookie set, with the tracking ones in brackets. ' +
+    '*Scripts before consent* are pieces of code from outside companies that ran in the page before anyone answered the consent banner. ' +
+    'A page marked "Blocked by a bot check" showed a challenge instead of the real page, so its numbers are unreliable.',
+  ];
+}
+
+const fileLink = (name) => `[${name}](${name})`;
+
+function batchPageSection({ url, result, error, files }, i, saveHtml) {
+  if (!result) {
+    return [`## ${i + 1}. ${hostOf(url)}`, code(url), "**This page couldn't be scanned.**", code(error)];
+  }
+  const out = [`## ${i + 1}. ${hostOf(result.input.finalUrl || url)}`, `**${verdictLine(result)}**`];
+  if (result.blocked.detected) out.push(result.blocked.reason);
+  const finalUrl = result.input.finalUrl && result.input.finalUrl !== url ? `, which ended up at ${code(result.input.finalUrl)}` : '';
+  out.push(`Scanned ${code(url)}${finalUrl}.`);
+  if (files.html) out.push(`Full data: ${fileLink(files.json)}. Rendered HTML: ${fileLink(files.html)}.`);
+  else if (saveHtml) out.push(`Full data: ${fileLink(files.json)}. The rendered HTML couldn't be saved.`);
+  else out.push(`Full data: ${fileLink(files.json)}.`);
+  out.push(...bannerSection(result, '###'), ...companiesSection(result, '###', 'the JSON file'), ...cookiesSection(result, '###'));
+  if (result.warnings.length) out.push('### Warnings', result.warnings.map((w) => `- ${w}`).join('\n'));
+  return out;
+}
+
+function batchMeaningSection() {
+  return [
+    '## What this means',
+    'Pages marked "Findings" contacted outside companies, or set tracking cookies, before anyone answered the consent banner. ' +
+    'Privacy rules in the EU and UK generally require consent before tracking, so those pages are worth reviewing with whoever runs the site. ' +
+    CAVEAT,
+  ];
+}
+
+/**
+ * @param {{ startedAt: string, waitSeconds: number, locale: string, timezone: string, exitCountry: string|null,
+ *   saveHtml?: boolean, entries: { url: string, result: object|null, error: string|null, files: { json: string, html: string|null }|null }[] }} batch
+ */
+export function renderBatchMarkdown({ startedAt, waitSeconds, locale, timezone, exitCountry, saveHtml = false, entries }) {
+  const intro = [`**${batchVerdict(entries)}**`];
+  if (!ALLOWED_COUNTRIES.has(exitCountry)) intro.push(EU_WARNING);
+  intro.push(
+    `Scanned on ${formatDate(startedAt)}, from ${countryPhrase(exitCountry)} (browser set to ${locale}, ${timezone}). ` +
+    "Each page was loaded in its own fresh browser, nothing was clicked, and activity was recorded for " +
+    `${plural(waitSeconds, 'second', 'seconds')} after each page finished loading.`,
+  );
+  return [
+    `# Consent scan batch: ${plural(entries.length, 'page', 'pages')}`,
+    ...intro,
+    ...batchSummarySection(entries),
+    ...entries.flatMap((e, i) => batchPageSection(e, i, saveHtml)),
+    ...batchMeaningSection(),
+    '## Limitations',
+    [...LIMITATIONS, "Each page's own warnings are listed in its section."].map((w) => `- ${w}`).join('\n'),
+  ].join('\n\n') + '\n';
 }

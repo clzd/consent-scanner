@@ -61,10 +61,11 @@ async function inspectPage(page) {
 }
 
 /**
- * @param {{ url: string, waitSeconds: number, locale: string, timezone: string }} opts
- * @returns raw result (see test/fixtures/raw.json for the shape)
+ * @param {{ url: string, waitSeconds: number, locale: string, timezone: string, captureHtml?: boolean }} opts
+ * @returns raw result (see test/fixtures/raw.json for the shape), plus `html`: the rendered page,
+ *   or null when captureHtml is off or the page stopped responding
  */
-export async function runScan({ url, waitSeconds, locale, timezone }) {
+export async function runScan({ url, waitSeconds, locale, timezone, captureHtml = false }) {
   let browser;
   try {
     browser = await chromium.launch({ headless: true });
@@ -77,7 +78,6 @@ export async function runScan({ url, waitSeconds, locale, timezone }) {
     const context = await browser.newContext({ locale, timezoneId: timezone });
     const requests = [];
     const byRequest = new Map();
-    const pending = [];
     let recording = true;
     let t0 = Date.now();
 
@@ -103,7 +103,8 @@ export async function runScan({ url, waitSeconds, locale, timezone }) {
     context.on('requestfinished', (req) => {
       const entry = byRequest.get(req);
       if (!recording || !entry) return;
-      pending.push(req.response().then((res) => { entry.status = res?.status() ?? null; }, () => {}));
+      // Synchronous on purpose: req.response() has no timeout and can stay pending forever after a request finishes.
+      entry.status = req.existingResponse()?.status() ?? null;
     });
     context.on('requestfailed', (req) => {
       const entry = byRequest.get(req);
@@ -132,13 +133,26 @@ export async function runScan({ url, waitSeconds, locale, timezone }) {
 
     await sleep(waitSeconds * 1000);
     recording = false;
-    await Promise.allSettled(pending);
 
     const cookies = (await context.cookies()).map(({ value, ...rest }) => rest);
+    const inspectStart = Date.now();
     let inspected = await withDeadline(inspectPage(page), INSPECT_TIMEOUT_MS);
+    let html = null;
     if (inspected === TIMED_OUT) {
       warnings.push("The page stopped responding while we checked it for a consent banner and a bot check, so neither could be detected.");
       inspected = { banner: { detected: false, cmp: null, visible: null }, title: '', presentBotSelectors: [], userAgent: null };
+    } else if (captureHtml) {
+      // The DOM as it stands after the wait window, serialized: what scripts built, not the original source.
+      // It gets what's left of the deadline on its own, so a timeout here never discards the detection results.
+      const remaining = Math.max(0, INSPECT_TIMEOUT_MS - (Date.now() - inspectStart));
+      const content = await withDeadline(page.content().catch((err) => ({ error: firstLine(err) })), remaining);
+      if (content === TIMED_OUT) {
+        warnings.push("The page stopped responding while we saved its HTML, so no HTML file was written.");
+      } else if (typeof content === 'string') {
+        html = content;
+      } else {
+        warnings.push(`The page's HTML couldn't be read (${content.error}), so no HTML file was written.`);
+      }
     }
     const { banner, title, presentBotSelectors, userAgent } = inspected;
 
@@ -153,6 +167,7 @@ export async function runScan({ url, waitSeconds, locale, timezone }) {
       banner,
       requests,
       cookies,
+      html,
     };
   } finally {
     await browser.close().catch(() => {});
