@@ -4,18 +4,21 @@
 
 `consent-scanner` loads one URL in headless Chromium **without giving consent** and reports every third-party request, third-party script, and cookie that appeared before anyone touched the consent banner. It writes two files: a plain-language Markdown report for non-technical readers (marketing, legal, site owners) and a JSON file with the full data.
 
+[Batch mode](#batch-mode) scans up to 10 URLs from a list file in one run and writes one combined report.
+
 The tool never clicks, scrolls, or interacts with the page. Everything it sees during the scan happened before consent.
 
 ## Scope
 
-- One command, one URL in, two files out.
+- One command, one URL in, two files out. Or, in batch mode, a list of up to 10 URLs in, a JSON file per URL plus one combined report out. `--save-html` adds each page's rendered HTML in either mode.
 - Node.js ≥ 20, ESM.
 - Dependencies: `playwright` (Chromium only) and `tldts` (Public Suffix List lookups). Arguments are parsed with `node:util` `parseArgs`. Nothing else.
 
 ### Non-goals
 
 - Clicking "Accept" or "Reject" and comparing the before/after behavior.
-- Crawling more than one page, or scanning more than one URL per run.
+- Crawling: following links from a page. Batch mode scans exactly the URLs in its list and nothing else.
+- More than 10 URLs per run, or a configurable concurrency.
 - Routing through a proxy or changing IP address. Use a system-wide VPN (such as NordVPN, connected to an EU server) to get an EU IP. The tool only verifies the exit location and matches the browser's timezone to it (see [Location check](#location-check)).
 - Inspecting localStorage, sessionStorage, or IndexedDB, or detecting fingerprinting.
 - Making any legal judgment. The report describes what happened; it does not say whether that was lawful.
@@ -23,22 +26,25 @@ The tool never clicks, scrolls, or interacts with the page. Everything it sees d
 ## CLI
 
 ```
-consent-scanner <url> [--wait <seconds>] [--out <dir>] [--locale <bcp47>] [--timezone <iana>] [--require-eu]
+consent-scanner <url> [--wait <seconds>] [--out <dir>] [--locale <bcp47>] [--timezone <iana>] [--require-eu] [--save-html]
+consent-scanner --urls <file> [--wait <seconds>] [--out <dir>] [--locale <bcp47>] [--timezone <iana>] [--require-eu] [--save-html]
 consent-scanner --help
 ```
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `<url>` | required | Page to scan. If the scheme is missing, `https://` is added. |
+| `<url>` | required unless `--urls` | Page to scan. If the scheme is missing, `https://` is added. |
+| `--urls` | none | List file for [batch mode](#batch-mode). Can't be combined with `<url>`. |
 | `--wait` | `10` | Seconds to keep recording after the `load` event fires. |
 | `--out` | `.` | Directory for the output files. Created if it doesn't exist. |
 | `--locale` | `en-GB` | Browser locale. Also sets the `Accept-Language` header and `navigator.language`. |
 | `--timezone` | from exit IP | IANA timezone ID for the browser. By default it's taken from the exit-IP lookup, so it matches the VPN server's location (see [Location check](#location-check)). An invalid ID exits `2`. |
 | `--require-eu` | off | Refuse to scan (exit `2`) when the exit IP is outside the EU/EEA/UK, or when the location lookup fails. Without it, such scans run but carry a prominent warning. |
+| `--save-html` | off | Also save each page's [rendered HTML](#batch-mode) as `<host>-<YYYYMMDD-HHmmss>.html` next to its JSON. It's off by default because the file can be megabytes and can contain whatever the site wrote into the page. |
 
-**Output files:** `<host>-<YYYYMMDD-HHmmss>.md` and `.json`. `<host>` is the input URL's hostname with every character outside `[a-z0-9.-]` replaced by `-`. The timestamp is in UTC.
+**Output files (single URL):** `<host>-<YYYYMMDD-HHmmss>.md` and `.json`, plus `.html` with `--save-html`. `<host>` is the input URL's hostname with every character outside `[a-z0-9.-]` replaced by `-`. The timestamp is in UTC.
 
-**stdout:** the one-line verdict, followed by the paths of both files.
+**stdout:** the one-line verdict, followed by the paths of both files, then the `.html` path when one was saved.
 
 **stderr:** errors, and the location warning when the scan isn't from a verified EU/EEA/UK location.
 
@@ -50,6 +56,73 @@ consent-scanner --help
 | `1` | Scan completed with findings (see [Findings](#findings)). |
 | `2` | Error: invalid URL, browser launch failure, navigation failure, or a failed location check (exit IP outside the EU/EEA/UK, or the lookup failed) with `--require-eu`. The message goes to stderr and no files are written. |
 | `3` | Blocked: the site showed a bot check instead of the real page (see [Bot-check detection](#bot-check-detection)). Both files are still written, marked unreliable, so you can see what happened. |
+
+## Batch mode
+
+`consent-scanner --urls urls.txt` scans every URL in `urls.txt`.
+
+**List file:** UTF-8 text, one URL per line. Leading and trailing whitespace is trimmed, blank lines and lines starting with `#` are skipped, and a leading byte-order mark is ignored. Each URL is normalized like `<url>` (missing scheme gets `https://`, only http and https allowed). Duplicates after normalizing are scanned once. The tool exits `2` before the location check, and writes nothing, when the file can't be read, a line isn't a valid URL (the message names the line number), there are no URLs, or there are more than 10.
+
+**Running:**
+
+1. The [location check](#location-check) runs once for the whole batch, before any browser starts. Under `--require-eu` a failure exits `2` and writes nothing.
+2. `--out` is created, then up to 3 URLs are scanned at a time. Each scan follows the normal [scan procedure](#scan-procedure) steps 2 to 9 in its own browser, so no state is shared between URLs. `--wait`, `--locale`, and `--timezone` apply to every URL.
+3. A URL that fails (navigation error, browser launch failure) doesn't stop the batch. Its error goes to stderr and it gets a "Scan failed" row in the report. No files are written for it.
+
+**Output files**, all in `--out`:
+
+| File | Contents |
+|---|---|
+| `<host>-<YYYYMMDD-HHmmss>.json` | One per scanned URL, the same [JSON output](#json-output) as a single scan. |
+| `<host>-<YYYYMMDD-HHmmss>.html` | Only with `--save-html`. One per scanned URL, next to its JSON: the page's final rendered HTML (see below). |
+| `batch-<YYYYMMDD-HHmmss>.md` | The [batch report](#batch-report). The timestamp is when the batch started, in UTC. |
+
+Two scans of the same host can finish in the same second, so a name that's already taken gets `-2`, `-3`, and so on (`localhost-20261008-140000-2.json`). A name counts as taken when its `.json` or its `.html` exists. The same applies to the batch report. Each file is created only if it doesn't exist yet, in one step, so nothing is ever overwritten, even by another run writing to the same `--out`.
+
+**Rendered HTML:** with `--save-html`, after the wait window, the tool saves `page.content()`, the main frame's DOM serialized as HTML, so other tools can analyze the page later. It is the page as scripts left it, not the original source, and iframe contents aren't included. It is read on the page's main thread right after banner and bot-check detection, and gets whatever is left of their 5 s inspection deadline. If the deadline passes while the HTML is read, the detection results are kept, no `.html` file is written, and the report and JSON warnings say so. Without `--save-html` it isn't read at all. The HTML is never put in the JSON.
+
+The saved HTML is untrusted content from the scanned site. Treat it as data: open it in a text editor or parse it, rather than opening it in a browser, where its scripts would run. It can also contain anything the site wrote into the page, such as CSRF tokens or IDs that match cookie values. The "cookie values are never stored" rule covers the JSON and the reports, not this file.
+
+**stdout:** one line per URL, in list order: `<url>: <verdict>`, or `<url>: This page couldn't be scanned.` The last line is the batch report's path.
+
+**Exit code:** the most serious result across all URLs, in this order: `2` if any scan failed, else `3` if any page was blocked, else `1` if any page has findings, else `0`.
+
+### Batch report
+
+Same plain-language rules as the [Markdown report](#markdown-report). Site-supplied text (URLs, error messages, page titles) goes in Markdown code spans, and table cells escape `|`.
+
+```markdown
+# Consent scan batch: 4 pages
+
+**Before any consent was given, 2 of 4 pages contacted outside companies or set tracking cookies. 1 page showed a bot check instead of the real page. 1 page couldn't be scanned.**
+
+Scanned on 8 Oct 2026, 14:00 UTC, from Germany (browser set to en-GB, Europe/Berlin). Each page was loaded in its own fresh browser, …
+
+## Summary
+| URL | Result | Third parties | Cookies | Scripts before consent |
+|---|---|---|---|---|
+| `https://example.com/` | Findings | 4 | 5 (3 tracking) | 3 |
+| `https://clean.example/` | No findings | 0 | 0 | 0 |
+| `https://blocked.example/` | Blocked by a bot check | 0 | 0 | 0 |
+| `https://down.example/` | Scan failed | n/a | n/a | n/a |
+
+## 1. www.example.com
+Verdict, the URL scanned (and where it redirected), links to its JSON file (and its HTML file with --save-html), then
+### Consent banner, ### Who was contacted, ### Cookies (same wording as the single report),
+and ### Warnings when the scan had any.
+
+## 2. clean.example
+…
+
+## What this means
+## Limitations
+```
+
+- *Third parties* is `summary.companies`, *Cookies* is `summary.cookies` with `summary.trackingCookies` in brackets when it isn't 0, and *Scripts before consent* is `summary.thirdPartyScripts`. A sentence under the table explains each column in plain words.
+- When there are no findings, no blocked pages, and no failures, the verdict reads: **"No third-party trackers or tracking cookies were detected before consent on any of the N pages."**
+- The ⚠️ EU warning appears once, after the verdict, when the batch's location isn't a verified EU/EEA/UK one.
+- The per-request appendix is left out. That detail is in each URL's JSON, and the "Unrecognized third party" note points there instead.
+- A failed URL's section says **"This page couldn't be scanned."** followed by the error in a code span.
 
 ## Scan procedure
 
@@ -228,6 +301,7 @@ The signatures live in `src/cmps.js` as plain data, so adding a CMP needs no cod
 - `requests` contains **every** request, first-party included, each with a `party` field.
 - `companies` contains third parties only. Unrecognized domains are grouped under `"company": "Unrecognized"`.
 - Cookie **values are never stored**.
+- The rendered HTML is never stored in the JSON. `--save-html` saves it as a separate file.
 - `expires` is `null` for session cookies.
 
 ## Markdown report
@@ -278,7 +352,9 @@ src/location.js         exit-IP lookup, allowed-country set, timezone selection
 src/cmps.js             CMP signature data
 src/botchecks.js        bot-check signature data
 src/classify.js         party resolution, tracker lookup, company grouping, findings
-src/report.js           renderMarkdown(result), renderJson(result)
+src/report.js           renderMarkdown(result), renderJson(result), renderBatchMarkdown(batch)
+src/urls.js             URL normalization and --urls list parsing, the 10-URL limit
+src/batch.js            concurrency-limited map, the batch's overall outcome
 data/trackers.json      bundled tracker list
 test/                   node:test
 ```
@@ -289,7 +365,9 @@ test/                   node:test
 
 - **Unit (`node:test`):** party resolution, including subdomains, multi-part TLDs like `.co.uk`, IP addresses, and `localhost`. Also tracker domain and cookie matching, the findings rules (for example, CMP-only traffic produces no findings), and Markdown rendering against a fixture raw result.
 - **Location (unit):** `src/location.js` gets the ipinfo response as input, so it can be tested without a network. Cover EU, EEA, and GB countries passing with no warning; a non-EU country and a malformed or failed response passing with a warning by default and failing under `--require-eu`; and the timezone choice (an explicit `--timezone` wins, then the exit-IP timezone, then `Europe/Berlin`).
+- **Batch (unit):** list parsing (comments, blank lines, CRLF, BOM, duplicates, the line number in errors, the 10-URL limit), the concurrency-limited map (keeps order, never more than 3 at once), the outcome order (failed, blocked, findings, clean), and the batch report against fixture results: the summary table rows, per-URL sections with file links, failed and blocked entries, and a hostile URL that tries to break the table or inject a link.
 - **Integration:** a local `http` server serves a page on `localhost:<port>` that loads a script from `127.0.0.1:<port2>` and sets a `_ga` cookie. The test runs the CLI and asserts exit code `1`, that both files exist, and that the JSON contains one third-party script and one tracking cookie. A second page with no third-party activity must exit `0`. A third page titled "Just a moment..." containing `#challenge-form` must exit `3`. Integration tests set `CONSENT_SCANNER_IPINFO_URL` to a local stub that returns `{"country":"DE","timezone":"Europe/Berlin"}`, so they pass without a VPN. Other stubs return a non-EU country and a malformed body, to cover the warn-by-default path and the `--require-eu` exit `2`. This environment variable is the only test hook.
+- **Batch integration:** a list with a comment, a blank line, and a duplicate, covering the tracking, clean, challenge, and a script-built page, run with `--save-html`, exits `3` and writes 4 JSON files, 4 HTML files, and 1 batch report. The script-built page's HTML contains the element its script added. A page that holds its response for 1.5 s shows that no more than 3 scans run at once. A page that freezes while its HTML is read keeps its banner result and gets no `.html` file. When every candidate name in `--out` is already taken, the outputs move to `-2` and the existing files are untouched. Without `--save-html` a batch writes no `.html` files and its report never mentions HTML. A single-URL scan with `--save-html` writes a third file, the rendered HTML, and prints its path last. An unreachable URL in a list gets a "Scan failed" row while the rest still scan, and the batch exits `2`. Invalid lists (too many URLs, a bad line, empty, missing file), `--urls` combined with `<url>`, and `--require-eu` outside the EU all exit `2` and write nothing.
 
 ## Acceptance criteria
 
@@ -302,6 +380,9 @@ test/                   node:test
 7. With the VPN on an EU server, the browser's timezone matches the exit IP's timezone, and the JSON records the exit IP and country.
 8. With the VPN off (or on a non-EU server), the tool still scans, prints a warning to stderr, and the report carries the ⚠️ warning. With `--require-eu`, it instead exits `2` without launching the browser.
 9. A page that serves a Cloudflare challenge is reported as blocked and exits `3`.
+10. `consent-scanner --urls urls.txt` with up to 10 URLs scans at most 3 at a time and writes a JSON file per URL plus one `batch-<ts>.md` with a summary table and a section per URL. With `--save-html` it also writes a rendered HTML file per URL.
+11. A list with more than 10 URLs, or an invalid line, exits `2` before any scan and writes nothing.
+12. One failing URL in a batch doesn't stop the others. The report marks it "Scan failed" and the batch exits `2`.
 
 ## Setup
 
